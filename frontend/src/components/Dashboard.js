@@ -133,7 +133,7 @@ function Dashboard() {
       </div>
 
       <div className="welcome-message">
-        <h2>Welcome to Hostel Management System</h2>
+        <h2>Welcome to Paid Guest Management System</h2>
         <p>Use the navigation menu above to manage guests, rooms, and bookings.</p>
       </div>
     </div>
