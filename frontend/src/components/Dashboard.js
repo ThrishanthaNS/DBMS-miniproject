@@ -56,8 +56,8 @@ function Dashboard() {
   return (
     <div className="dashboard-container">
       <div className="dashboard-header">
-        <h1>Hostel Management System</h1>
-        <p className="subtitle">Welcome to your hostel management dashboard</p>
+        <h1>Paid Guest Management System</h1>
+        <p className="subtitle">Welcome to your PG management dashboard</p>
       </div>
 
       <div className="dashboard-grid">

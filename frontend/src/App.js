@@ -33,7 +33,7 @@ function App() {
     <div className="App">
       <nav className="navbar">
         <div className="nav-brand">
-          <h1>🏨 Hostel Management</h1>
+          <h1>🏨 PG Management</h1>
         </div>
         <div className="nav-links">
           <button
