@@ -165,6 +165,17 @@ class BookingStatus(str, Enum):
     COMPLETED = 'Completed'
     CANCELLED = 'Cancelled'
 
+class PaymentMethod(str, Enum):
+    CASH = 'Cash'
+    UPI = 'UPI'
+    CARD = 'Card'
+    BANK_TRANSFER = 'Bank Transfer'
+
+class MaintenanceStatus(str, Enum):
+    PENDING = 'Pending'
+    IN_PROGRESS = 'In Progress'
+    RESOLVED = 'Resolved'
+
 # Guest Models
 class GuestBase(BaseModel):
     full_name: str
@@ -215,6 +226,42 @@ class BookingCreate(BookingBase):
 class Booking(BookingBase):
     booking_id: int
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# Payment Models
+class PaymentBase(BaseModel):
+    booking_id: int
+    amount_paid: Decimal = Field(..., gt=0)
+    payment_date: date
+    payment_method: PaymentMethod
+    remarks: Optional[str] = None
+
+class PaymentCreate(PaymentBase):
+    pass
+
+class Payment(PaymentBase):
+    payment_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# Maintenance Request Models
+class MaintenanceRequestBase(BaseModel):
+    room_id: int
+    guest_id: Optional[int] = None
+    issue_description: str
+    reported_date: date
+    status: MaintenanceStatus = MaintenanceStatus.PENDING
+    resolved_date: Optional[date] = None
+
+class MaintenanceRequestCreate(MaintenanceRequestBase):
+    pass
+
+class MaintenanceRequest(MaintenanceRequestBase):
+    request_id: int
 
     class Config:
         from_attributes = True
@@ -337,6 +384,142 @@ def create_booking(booking: BookingCreate, conn=Depends(get_db_connection)):
         cursor.execute("SELECT * FROM Bookings WHERE booking_id = %s", (booking_id,))
         new_booking = cursor.fetchone()
         return new_booking
+
+    except mysql.connector.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=f"Database error: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# --- Payment Endpoints ---
+
+@app.get("/api/payments", response_model=List[Payment])
+def get_all_payments(conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM Payments ORDER BY payment_date DESC")
+    payments = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return payments
+
+@app.post("/api/payments", response_model=Payment, status_code=201)
+def create_payment(payment: PaymentCreate, conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # Check if booking exists
+        cursor.execute("SELECT booking_id FROM Bookings WHERE booking_id = %s", (payment.booking_id,))
+        booking = cursor.fetchone()
+        if not booking:
+            raise HTTPException(status_code=404, detail=f"Booking with id {payment.booking_id} not found.")
+        
+        # Create payment
+        sql = """
+        INSERT INTO Payments (booking_id, amount_paid, payment_date, payment_method, remarks)
+        VALUES (%s, %s, %s, %s, %s)
+        """
+        cursor.execute(sql, (
+            payment.booking_id, payment.amount_paid, payment.payment_date,
+            payment.payment_method.value, payment.remarks
+        ))
+        
+        conn.commit()
+        payment_id = cursor.lastrowid
+        
+        cursor.execute("SELECT * FROM Payments WHERE payment_id = %s", (payment_id,))
+        new_payment = cursor.fetchone()
+        return new_payment
+
+    except mysql.connector.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=f"Database error: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# --- Maintenance Request Endpoints ---
+
+@app.get("/api/maintenance", response_model=List[MaintenanceRequest])
+def get_all_maintenance_requests(conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM MaintenanceRequests ORDER BY reported_date DESC")
+    requests = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return requests
+
+@app.post("/api/maintenance", response_model=MaintenanceRequest, status_code=201)
+def create_maintenance_request(request: MaintenanceRequestCreate, conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # Check if room exists
+        cursor.execute("SELECT room_id FROM Rooms WHERE room_id = %s", (request.room_id,))
+        room = cursor.fetchone()
+        if not room:
+            raise HTTPException(status_code=404, detail=f"Room with id {request.room_id} not found.")
+        
+        # Check if guest exists (if provided)
+        if request.guest_id:
+            cursor.execute("SELECT guest_id FROM Guests WHERE guest_id = %s", (request.guest_id,))
+            guest = cursor.fetchone()
+            if not guest:
+                raise HTTPException(status_code=404, detail=f"Guest with id {request.guest_id} not found.")
+        
+        # Create maintenance request
+        sql = """
+        INSERT INTO MaintenanceRequests (room_id, guest_id, issue_description, reported_date, status, resolved_date)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(sql, (
+            request.room_id, request.guest_id, request.issue_description,
+            request.reported_date, request.status.value, request.resolved_date
+        ))
+        
+        conn.commit()
+        request_id = cursor.lastrowid
+        
+        cursor.execute("SELECT * FROM MaintenanceRequests WHERE request_id = %s", (request_id,))
+        new_request = cursor.fetchone()
+        return new_request
+
+    except mysql.connector.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=f"Database error: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.patch("/api/maintenance/{request_id}", response_model=MaintenanceRequest)
+def update_maintenance_request(
+    request_id: int,
+    status: MaintenanceStatus,
+    resolved_date: Optional[date] = None,
+    conn=Depends(get_db_connection)
+):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # Check if request exists
+        cursor.execute("SELECT * FROM MaintenanceRequests WHERE request_id = %s", (request_id,))
+        existing_request = cursor.fetchone()
+        if not existing_request:
+            raise HTTPException(status_code=404, detail=f"Maintenance request with id {request_id} not found.")
+        
+        # Update the request
+        sql = """
+        UPDATE MaintenanceRequests 
+        SET status = %s, resolved_date = %s
+        WHERE request_id = %s
+        """
+        cursor.execute(sql, (status.value, resolved_date, request_id))
+        
+        conn.commit()
+        
+        # Fetch and return the updated request
+        cursor.execute("SELECT * FROM MaintenanceRequests WHERE request_id = %s", (request_id,))
+        updated_request = cursor.fetchone()
+        return updated_request
 
     except mysql.connector.Error as e:
         conn.rollback()
