@@ -99,6 +99,31 @@ function BookingManagement() {
     return <span className={`badge badge-${statusClass}`}>{status}</span>;
   };
 
+  const updateBookingStatus = async (bookingId, newStatus) => {
+    if (!window.confirm(`Are you sure you want to change this booking to ${newStatus}?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/bookings/${bookingId}?booking_status=${newStatus}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to update booking');
+      }
+      
+      await fetchData();
+      alert(`Booking status updated to ${newStatus} successfully! Room occupancy has been synchronized.`);
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+    }
+  };
+
   const getGuestName = (guestId) => {
     const guest = guests.find(g => g.guest_id === guestId);
     return guest ? guest.full_name : 'Unknown';
@@ -250,6 +275,7 @@ function BookingManagement() {
                 <th>Check-out</th>
                 <th>Status</th>
                 <th>Created At</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -262,6 +288,29 @@ function BookingManagement() {
                   <td>{booking.check_out_date ? new Date(booking.check_out_date).toLocaleDateString() : '-'}</td>
                   <td>{getStatusBadge(booking.booking_status)}</td>
                   <td>{new Date(booking.created_at).toLocaleDateString()}</td>
+                  <td>
+                    <div className="action-buttons">
+                      {booking.booking_status === 'Active' && (
+                        <>
+                          <button
+                            className="btn-small btn-success"
+                            onClick={() => updateBookingStatus(booking.booking_id, 'Completed')}
+                          >
+                            Complete
+                          </button>
+                          <button
+                            className="btn-small btn-warning"
+                            onClick={() => updateBookingStatus(booking.booking_id, 'Cancelled')}
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                      {booking.booking_status !== 'Active' && (
+                        <span style={{color: '#999', fontSize: '12px'}}>No actions</span>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

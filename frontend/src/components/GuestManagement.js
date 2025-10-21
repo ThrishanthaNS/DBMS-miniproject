@@ -75,6 +75,28 @@ function GuestManagement() {
     });
   };
 
+  const handleDelete = async (guestId, guestName) => {
+    if (!window.confirm(`Are you sure you want to delete guest "${guestName}"?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/guests/${guestId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to delete guest');
+      }
+
+      await fetchGuests();
+      alert('Guest deleted successfully!');
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+    }
+  };
+
   if (loading) return <div className="loading">Loading guests...</div>;
   if (error) return <div className="error">Error: {error}</div>;
 
@@ -188,6 +210,7 @@ function GuestManagement() {
                 <th>ID Number</th>
                 <th>Address</th>
                 <th>Created At</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -201,6 +224,14 @@ function GuestManagement() {
                   <td>{guest.id_proof_number || '-'}</td>
                   <td>{guest.address || '-'}</td>
                   <td>{new Date(guest.created_at).toLocaleDateString()}</td>
+                  <td>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => handleDelete(guest.guest_id, guest.full_name)}
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

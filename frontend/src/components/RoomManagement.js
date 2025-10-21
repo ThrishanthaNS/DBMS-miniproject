@@ -76,6 +76,28 @@ function RoomManagement() {
     return <span className={`badge badge-${statusClass}`}>{status}</span>;
   };
 
+  const handleDelete = async (roomId, roomNumber) => {
+    if (!window.confirm(`Are you sure you want to delete room "${roomNumber}"?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/rooms/${roomId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to delete room');
+      }
+
+      await fetchRooms();
+      alert('Room deleted successfully!');
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+    }
+  };
+
   if (loading) return <div className="loading">Loading rooms...</div>;
   if (error) return <div className="error">Error: {error}</div>;
 
@@ -197,6 +219,7 @@ function RoomManagement() {
                 <th>Monthly Rent</th>
                 <th>Status</th>
                 <th>Created At</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -208,6 +231,14 @@ function RoomManagement() {
                   <td>₹{parseFloat(room.monthly_rent).toLocaleString()}</td>
                   <td>{getStatusBadge(room.occupancy_status)}</td>
                   <td>{new Date(room.created_at).toLocaleDateString()}</td>
+                  <td>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => handleDelete(room.room_id, room.room_number)}
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

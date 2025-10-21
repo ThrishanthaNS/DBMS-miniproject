@@ -10,10 +10,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 
-# Load environment variables from .env file
 load_dotenv()
 
-# --- Database Configuration ---
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'localhost'),
     'port': int(os.getenv('DB_PORT', 3306)),
@@ -22,9 +20,7 @@ DB_CONFIG = {
     'database': os.getenv('DB_NAME', 'hostel_management_db')
 }
 
-# --- Database Connection ---
 def get_db_connection():
-    """Establishes and returns a database connection."""
     try:
         conn = mysql.connector.connect(**DB_CONFIG)
         return conn
@@ -33,16 +29,12 @@ def get_db_connection():
         # In a real app, you might want to handle this more gracefully
         raise HTTPException(status_code=500, detail="Database connection failed")
 
-# --- Database Setup ---
 def setup_database():
-    """Ensures the database and all necessary tables are created."""
     db_name = DB_CONFIG['database']
-    # Temporary config without a specific database to create it
     temp_config = DB_CONFIG.copy()
     temp_config.pop('database', None)
 
     try:
-        # Connect to MySQL server to create the database
         conn = mysql.connector.connect(**temp_config)
         cursor = conn.cursor()
         cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{db_name}`")
@@ -139,22 +131,16 @@ def setup_database():
         print(f"Failed to set up database: {e}")
         raise
 
-# --- FastAPI App Initialization ---
 app = FastAPI(title="Hostel Management API")
 
-# CORS Middleware for allowing frontend connections
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"], # Adjust for your frontend URL
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# --- Pydantic Models (Data Schemas) ---
-
-# Enums for validation
 class RoomStatus(str, Enum):
     AVAILABLE = 'Available'
     OCCUPIED = 'Occupied'
@@ -176,7 +162,6 @@ class MaintenanceStatus(str, Enum):
     IN_PROGRESS = 'In Progress'
     RESOLVED = 'Resolved'
 
-# Guest Models
 class GuestBase(BaseModel):
     full_name: str
     phone_number: str
@@ -195,7 +180,6 @@ class Guest(GuestBase):
     class Config:
         from_attributes = True
 
-# Room Models
 class RoomBase(BaseModel):
     room_number: str
     room_type: str
@@ -212,7 +196,6 @@ class Room(RoomBase):
     class Config:
         from_attributes = True
 
-# Booking Models
 class BookingBase(BaseModel):
     guest_id: int
     room_id: int
@@ -230,7 +213,6 @@ class Booking(BookingBase):
     class Config:
         from_attributes = True
 
-# Payment Models
 class PaymentBase(BaseModel):
     booking_id: int
     amount_paid: Decimal = Field(..., gt=0)
@@ -248,7 +230,6 @@ class Payment(PaymentBase):
     class Config:
         from_attributes = True
 
-# Maintenance Request Models
 class MaintenanceRequestBase(BaseModel):
     room_id: int
     guest_id: Optional[int] = None
@@ -266,14 +247,9 @@ class MaintenanceRequest(MaintenanceRequestBase):
     class Config:
         from_attributes = True
 
-
-# --- API Endpoints ---
-
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Hostel Management API"}
-
-# --- Guest Endpoints ---
 
 @app.get("/api/guests", response_model=List[Guest])
 def get_all_guests(conn=Depends(get_db_connection)):
@@ -308,7 +284,26 @@ def create_guest(guest: GuestCreate, conn=Depends(get_db_connection)):
         cursor.close()
         conn.close()
 
-# --- Room Endpoints ---
+@app.delete("/api/guests/{guest_id}")
+def delete_guest(guest_id: int, conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT * FROM Guests WHERE guest_id = %s", (guest_id,))
+        guest = cursor.fetchone()
+        if not guest:
+            raise HTTPException(status_code=404, detail=f"Guest with id {guest_id} not found.")
+        
+        cursor.execute("SELECT COUNT(*) as count FROM Bookings WHERE guest_id = %s AND booking_status = 'Active'", (guest_id,))
+        result = cursor.fetchone()
+        if result['count'] > 0:
+            raise HTTPException(status_code=400, detail="Cannot delete guest with active bookings.")
+        
+        cursor.execute("DELETE FROM Guests WHERE guest_id = %s", (guest_id,))
+        conn.commit()
+        return {"message": f"Guest {guest_id} deleted successfully"}
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.get("/api/rooms", response_model=List[Room])
 def get_all_rooms(conn=Depends(get_db_connection)):
@@ -342,7 +337,26 @@ def create_room(room: RoomCreate, conn=Depends(get_db_connection)):
         cursor.close()
         conn.close()
 
-# --- Booking Endpoints ---
+@app.delete("/api/rooms/{room_id}")
+def delete_room(room_id: int, conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT * FROM Rooms WHERE room_id = %s", (room_id,))
+        room = cursor.fetchone()
+        if not room:
+            raise HTTPException(status_code=404, detail=f"Room with id {room_id} not found.")
+        
+        cursor.execute("SELECT COUNT(*) as count FROM Bookings WHERE room_id = %s AND booking_status = 'Active'", (room_id,))
+        result = cursor.fetchone()
+        if result['count'] > 0:
+            raise HTTPException(status_code=400, detail="Cannot delete room with active bookings.")
+        
+        cursor.execute("DELETE FROM Rooms WHERE room_id = %s", (room_id,))
+        conn.commit()
+        return {"message": f"Room {room_id} deleted successfully"}
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.get("/api/bookings", response_model=List[Booking])
 def get_all_bookings(conn=Depends(get_db_connection)):
@@ -392,8 +406,113 @@ def create_booking(booking: BookingCreate, conn=Depends(get_db_connection)):
         cursor.close()
         conn.close()
 
+@app.patch("/api/bookings/{booking_id}")
+def update_booking_status(
+    booking_id: int,
+    booking_status: BookingStatus,
+    conn=Depends(get_db_connection)
+):
+    """Update booking status and automatically update room occupancy status."""
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # Get the booking details
+        cursor.execute("SELECT * FROM Bookings WHERE booking_id = %s", (booking_id,))
+        booking = cursor.fetchone()
+        if not booking:
+            raise HTTPException(status_code=404, detail=f"Booking with id {booking_id} not found.")
+        
+        room_id = booking['room_id']
+        old_status = booking['booking_status']
+        
+        # Update booking status
+        cursor.execute(
+            "UPDATE Bookings SET booking_status = %s WHERE booking_id = %s",
+            (booking_status.value, booking_id)
+        )
+        
+        # Update room occupancy based on new booking status
+        if booking_status in ['Completed', 'Cancelled']:
+            # Check if there are any other active bookings for this room
+            cursor.execute(
+                "SELECT COUNT(*) as count FROM Bookings WHERE room_id = %s AND booking_status = 'Active' AND booking_id != %s",
+                (room_id, booking_id)
+            )
+            result = cursor.fetchone()
+            
+            # If no other active bookings, set room to Available
+            if result['count'] == 0:
+                cursor.execute(
+                    "UPDATE Rooms SET occupancy_status = 'Available' WHERE room_id = %s",
+                    (room_id,)
+                )
+        elif booking_status == 'Active':
+            # Set room to Occupied when booking becomes active
+            cursor.execute(
+                "UPDATE Rooms SET occupancy_status = 'Occupied' WHERE room_id = %s",
+                (room_id,)
+            )
+        
+        conn.commit()
+        
+        # Fetch and return updated booking
+        cursor.execute("SELECT * FROM Bookings WHERE booking_id = %s", (booking_id,))
+        updated_booking = cursor.fetchone()
+        return updated_booking
+        
+    except mysql.connector.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=f"Database error: {e}")
+    finally:
+        cursor.close()
+        conn.close()
 
-# --- Payment Endpoints ---
+@app.post("/api/bookings/sync-room-status")
+def sync_room_occupancy_status(conn=Depends(get_db_connection)):
+    """Synchronize room occupancy status based on active bookings."""
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # Get all rooms
+        cursor.execute("SELECT room_id, occupancy_status FROM Rooms WHERE occupancy_status != 'Maintenance'")
+        rooms = cursor.fetchall()
+        
+        updated_count = 0
+        
+        for room in rooms:
+            room_id = room['room_id']
+            current_status = room['occupancy_status']
+            
+            # Check if room has any active bookings
+            cursor.execute(
+                "SELECT COUNT(*) as count FROM Bookings WHERE room_id = %s AND booking_status = 'Active'",
+                (room_id,)
+            )
+            result = cursor.fetchone()
+            active_bookings = result['count']
+            
+            # Determine correct status
+            correct_status = 'Occupied' if active_bookings > 0 else 'Available'
+            
+            # Update if status is incorrect
+            if current_status != correct_status:
+                cursor.execute(
+                    "UPDATE Rooms SET occupancy_status = %s WHERE room_id = %s",
+                    (correct_status, room_id)
+                )
+                updated_count += 1
+        
+        conn.commit()
+        
+        return {
+            "message": "Room occupancy status synchronized successfully",
+            "rooms_updated": updated_count
+        }
+        
+    except mysql.connector.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.get("/api/payments", response_model=List[Payment])
 def get_all_payments(conn=Depends(get_db_connection)):
@@ -437,9 +556,6 @@ def create_payment(payment: PaymentCreate, conn=Depends(get_db_connection)):
     finally:
         cursor.close()
         conn.close()
-
-
-# --- Maintenance Request Endpoints ---
 
 @app.get("/api/maintenance", response_model=List[MaintenanceRequest])
 def get_all_maintenance_requests(conn=Depends(get_db_connection)):
@@ -528,16 +644,270 @@ def update_maintenance_request(
         cursor.close()
         conn.close()
 
+@app.get("/api/analytics/single-rooms-per-week")
+def get_single_rooms_booked_per_week(conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        sql = """
+        SELECT COUNT(*) as single_room_bookings
+        FROM Bookings b
+        JOIN Rooms r ON b.room_id = r.room_id
+        WHERE r.room_type LIKE '%Single%'
+        AND (b.check_in_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+            OR b.created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY))
+        """
+        cursor.execute(sql)
+        result = cursor.fetchone()
+        count = result['single_room_bookings'] if result else 0
+        return {"single_room_bookings_last_week": count}
+    finally:
+        cursor.close()
+        conn.close()
 
-# --- Startup Event ---
+
+@app.get("/api/analytics/monthly-bookings-income")
+def get_monthly_bookings_and_income(conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        sql_bookings = """
+        SELECT COUNT(*) as total_bookings
+        FROM Bookings
+        WHERE check_in_date >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH)
+        """
+        cursor.execute(sql_bookings)
+        bookings_result = cursor.fetchone()
+        
+        sql_income = """
+        SELECT 
+            SUM(amount_paid) as total_income,
+            AVG(amount_paid) as avg_income
+        FROM Payments
+        WHERE payment_date >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH)
+        """
+        cursor.execute(sql_income)
+        income_result = cursor.fetchone()
+        
+        total_bookings = bookings_result['total_bookings'] if bookings_result else 0
+        total_income = float(income_result['total_income']) if income_result and income_result['total_income'] else 0
+        avg_income = float(income_result['avg_income']) if income_result and income_result['avg_income'] else 0
+        
+        return {
+            "total_bookings_last_month": total_bookings,
+            "total_income_last_month": total_income,
+            "avg_income_last_month": avg_income
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/analytics/maintenance-by-room")
+def get_maintenance_by_room(conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        sql = """
+        SELECT 
+            r.room_number,
+            r.room_type,
+            COUNT(m.request_id) as maintenance_count
+        FROM Rooms r
+        LEFT JOIN MaintenanceRequests m ON r.room_id = m.room_id
+        GROUP BY r.room_id, r.room_number, r.room_type
+        ORDER BY maintenance_count DESC
+        """
+        cursor.execute(sql)
+        results = cursor.fetchall()
+        return {"maintenance_by_room": results}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/analytics/guests-with-payments")
+def get_guests_who_paid_by_room(conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        sql = """
+        SELECT 
+            r.room_number,
+            r.room_type,
+            g.full_name as guest_name,
+            g.phone_number,
+            SUM(p.amount_paid) as total_paid,
+            COUNT(p.payment_id) as payment_count
+        FROM Rooms r
+        JOIN Bookings b ON r.room_id = b.room_id
+        JOIN Guests g ON b.guest_id = g.guest_id
+        JOIN Payments p ON b.booking_id = p.booking_id
+        GROUP BY r.room_id, r.room_number, r.room_type, g.guest_id, g.full_name, g.phone_number
+        ORDER BY r.room_number, total_paid DESC
+        """
+        cursor.execute(sql)
+        results = cursor.fetchall()
+        
+        for row in results:
+            if row.get('total_paid'):
+                row['total_paid'] = float(row['total_paid'])
+        
+        return {"guests_with_payments": results}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/analytics/rooms-booked-by-guest")
+def get_rooms_booked_by_guest(conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        sql = """
+        SELECT 
+            g.guest_id,
+            g.full_name,
+            g.phone_number,
+            g.email,
+            COUNT(DISTINCT b.room_id) as rooms_booked,
+            COUNT(b.booking_id) as total_bookings
+        FROM Guests g
+        LEFT JOIN Bookings b ON g.guest_id = b.guest_id
+        GROUP BY g.guest_id, g.full_name, g.phone_number, g.email
+        HAVING COUNT(b.booking_id) > 0
+        ORDER BY rooms_booked DESC, total_bookings DESC
+        """
+        cursor.execute(sql)
+        results = cursor.fetchall()
+        return {"rooms_by_guest": results}
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.get("/api/views/active-bookings")
+def get_active_bookings_view(conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT * FROM active_bookings_summary")
+        results = cursor.fetchall()
+        
+        # Convert Decimal to float for JSON serialization
+        for row in results:
+            if row.get('monthly_rent'):
+                row['monthly_rent'] = float(row['monthly_rent'])
+        
+        return {"active_bookings": results}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/views/room-revenue")
+def get_room_revenue_view(conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT * FROM room_revenue_summary")
+        results = cursor.fetchall()
+        
+        for row in results:
+            if row.get('monthly_rent'):
+                row['monthly_rent'] = float(row['monthly_rent'])
+            if row.get('total_revenue'):
+                row['total_revenue'] = float(row['total_revenue'])
+            else:
+                row['total_revenue'] = 0.0
+            if row.get('avg_payment'):
+                row['avg_payment'] = float(row['avg_payment'])
+            else:
+                row['avg_payment'] = 0.0
+        
+        return {"room_revenue": results}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/views/guest-payments")
+def get_guest_payment_history_view(conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT * FROM guest_payment_history")
+        results = cursor.fetchall()
+        
+        for row in results:
+            if row.get('total_paid'):
+                row['total_paid'] = float(row['total_paid'])
+            else:
+                row['total_paid'] = 0.0
+        
+        return {"guest_payments": results}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/views/maintenance-summary")
+def get_maintenance_summary_view(conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT * FROM maintenance_requests_summary")
+        results = cursor.fetchall()
+        return {"maintenance_summary": results}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/views/room-occupancy")
+def get_room_occupancy_view(conn=Depends(get_db_connection)):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT * FROM room_occupancy_status")
+        results = cursor.fetchall()
+        
+        # Convert Decimal to float for JSON serialization
+        for row in results:
+            if row.get('monthly_rent'):
+                row['monthly_rent'] = float(row['monthly_rent'])
+        
+        return {"room_occupancy": results}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/triggers/info")
+def get_triggers_info(conn=Depends(get_db_connection)):
+    """Get information about database triggers."""
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SHOW TRIGGERS")
+        triggers = cursor.fetchall()
+        
+        trigger_info = {
+            "total_triggers": len(triggers),
+            "triggers": [
+                {
+                    "name": t.get('Trigger'),
+                    "event": t.get('Event'),
+                    "table": t.get('Table'),
+                    "timing": t.get('Timing'),
+                    "statement": t.get('Statement')[:100] + "..." if len(t.get('Statement', '')) > 100 else t.get('Statement')
+                }
+                for t in triggers
+            ],
+            "description": {
+                "after_booking_insert": "Automatically sets room to 'Occupied' when an active booking is created",
+                "after_booking_update": "Updates room status when booking status changes (Completed/Cancelled → Available)",
+                "after_payment_insert": "Logs payment insertions (demonstration trigger)"
+            }
+        }
+        return trigger_info
+    finally:
+        cursor.close()
+        conn.close()
+
+
 @app.on_event("startup")
 def on_startup():
-    """Function to run on application startup."""
     print("Application is starting up...")
     try:
         setup_database()
     except Exception as e:
         print(f"An error occurred during startup: {e}")
-        # Depending on the severity, you might want to exit the application
-        # import sys
-        # sys.exit(1)

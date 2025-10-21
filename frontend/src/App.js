@@ -6,6 +6,8 @@ import RoomManagement from './components/RoomManagement';
 import BookingManagement from './components/BookingManagement';
 import PaymentManagement from './components/PaymentManagement';
 import MaintenanceManagement from './components/MaintenanceManagement';
+import AnalyticsManagement from './components/AnalyticsManagement';
+import ViewsTriggersManagement from './components/ViewsTriggersManagement';
 
 function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -24,6 +26,10 @@ function App() {
         return <PaymentManagement />;
       case 'maintenance':
         return <MaintenanceManagement />;
+      case 'analytics':
+        return <AnalyticsManagement />;
+      case 'views':
+        return <ViewsTriggersManagement />;
       default:
         return <Dashboard />;
     }
@@ -71,6 +77,18 @@ function App() {
             onClick={() => setCurrentView('maintenance')}
           >
             🔧 Maintenance
+          </button>
+          <button
+            className={currentView === 'analytics' ? 'nav-link active' : 'nav-link'}
+            onClick={() => setCurrentView('analytics')}
+          >
+            📈 Analytics
+          </button>
+          <button
+            className={currentView === 'views' ? 'nav-link active' : 'nav-link'}
+            onClick={() => setCurrentView('views')}
+          >
+            🗂️ Views & Triggers
           </button>
         </div>
       </nav>
