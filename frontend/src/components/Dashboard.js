@@ -9,14 +9,44 @@ function Dashboard() {
     totalRooms: 0,
     availableRooms: 0,
     occupiedRooms: 0,
+    maintenanceRooms: 0,
     activeBookings: 0,
     totalBookings: 0
   });
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [message, setMessage] = useState('');
 
   useEffect(() => {
     fetchDashboardData();
   }, []);
+
+  const syncRoomStatus = async () => {
+    setSyncing(true);
+    setMessage('');
+    try {
+      const response = await fetch(`${API_BASE}/api/bookings/sync-room-status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        setMessage(`✅ Success! ${result.rooms_updated} room(s) updated.`);
+        await fetchDashboardData();
+      } else {
+        setMessage('❌ Failed to sync room status.');
+      }
+    } catch (err) {
+      console.error('Error syncing room status:', err);
+      setMessage('❌ Error: ' + err.message);
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setMessage(''), 5000);
+    }
+  };
 
   const fetchDashboardData = async () => {
     try {
@@ -37,6 +67,7 @@ function Dashboard() {
         totalRooms: rooms.length,
         availableRooms: rooms.filter(r => r.occupancy_status === 'Available').length,
         occupiedRooms: rooms.filter(r => r.occupancy_status === 'Occupied').length,
+        maintenanceRooms: rooms.filter(r => r.occupancy_status === 'Maintenance').length,
         activeBookings: bookings.filter(b => b.booking_status === 'Active').length,
         totalBookings: bookings.length
       });
@@ -56,9 +87,23 @@ function Dashboard() {
   return (
     <div className="dashboard-container">
       <div className="dashboard-header">
-        <h1>Hostel Management System</h1>
-        <p className="subtitle">Welcome to your hostel management dashboard</p>
+        <h1>Paid Guest Management System</h1>
+        <p className="subtitle">Welcome to your PG management dashboard</p>
+        <button 
+          onClick={syncRoomStatus} 
+          disabled={syncing}
+          className="sync-button"
+          title="Synchronize room occupancy with active bookings"
+        >
+          {syncing ? '🔄 Syncing...' : '🔄 Sync Room Status'}
+        </button>
       </div>
+
+      {message && (
+        <div className={`message ${message.includes('✅') ? 'success-message' : 'error-message'}`}>
+          {message}
+        </div>
+      )}
 
       <div className="dashboard-grid">
         <div className="dashboard-card card-guests">
@@ -121,6 +166,10 @@ function Dashboard() {
               <span className="overview-value">{stats.availableRooms}</span>
             </div>
             <div className="overview-item">
+              <span className="overview-label">Maintenance Rooms:</span>
+              <span className="overview-value">{stats.maintenanceRooms}</span>
+            </div>
+            <div className="overview-item">
               <span className="overview-label">Active Bookings:</span>
               <span className="overview-value">{stats.activeBookings}</span>
             </div>
@@ -133,7 +182,7 @@ function Dashboard() {
       </div>
 
       <div className="welcome-message">
-        <h2>Welcome to Hostel Management System</h2>
+        <h2>Welcome to Paid Guest Management System</h2>
         <p>Use the navigation menu above to manage guests, rooms, and bookings.</p>
       </div>
     </div>
