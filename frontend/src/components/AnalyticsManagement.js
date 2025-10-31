@@ -98,15 +98,9 @@ function AnalyticsManagement() {
             </div>
             <div className="analytics-card">
               <div className="stat-value">
-                ₹{analytics.monthlyData.total_income_last_month.toFixed(2)}
+                ₹{analytics.monthlyData.total_income_last_month?.toFixed(2) || '0.00'}
               </div>
               <div className="stat-label">Total Income (Last Month)</div>
-            </div>
-            <div className="analytics-card">
-              <div className="stat-value">
-                ₹{analytics.monthlyData.avg_income_last_month.toFixed(2)}
-              </div>
-              <div className="stat-label">Average Income per Payment</div>
             </div>
           </div>
         )}
@@ -143,50 +137,42 @@ function AnalyticsManagement() {
         )}
       </div>
 
-      {/* Section 4: Guests with Payments by Room */}
+      {/* Section 4: Guests with Payments (Over ₹500) */}
       <div className="analytics-section">
-        <h3>💰 Guests with Payments by Room</h3>
+        <h3>💰 Guests with High Payments (Over ₹500)</h3>
         {analytics.guestsWithPayments.length > 0 ? (
           <table className="data-table">
             <thead>
               <tr>
                 <th>Room Number</th>
-                <th>Room Type</th>
                 <th>Guest Name</th>
-                <th>Phone Number</th>
                 <th>Total Paid</th>
-                <th>Payment Count</th>
               </tr>
             </thead>
             <tbody>
               {analytics.guestsWithPayments.map((item, index) => (
                 <tr key={index}>
                   <td>{item.room_number}</td>
-                  <td>{item.room_type}</td>
                   <td>{item.guest_name}</td>
-                  <td>{item.phone_number}</td>
-                  <td>₹{item.total_paid.toFixed(2)}</td>
-                  <td>{item.payment_count}</td>
+                  <td>₹{item.total_paid?.toFixed(2) || '0.00'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         ) : (
-          <p className="no-data">No payment data available</p>
+          <p className="no-data">No payment data available (over ₹500)</p>
         )}
       </div>
 
-      {/* Section 5: Rooms Booked by Each Guest */}
+      {/* Section 5: Bookings by Guest */}
       <div className="analytics-section">
-        <h3>👥 Rooms Booked by Each Guest</h3>
+        <h3>👥 Bookings by Guest</h3>
         {analytics.roomsByGuest.length > 0 ? (
           <table className="data-table">
             <thead>
               <tr>
                 <th>Guest Name</th>
                 <th>Phone Number</th>
-                <th>Email</th>
-                <th>Unique Rooms Booked</th>
                 <th>Total Bookings</th>
               </tr>
             </thead>
@@ -195,13 +181,11 @@ function AnalyticsManagement() {
                 <tr key={index}>
                   <td>{guest.full_name}</td>
                   <td>{guest.phone_number}</td>
-                  <td>{guest.email || 'N/A'}</td>
                   <td>
                     <span className="badge badge-info">
-                      {guest.rooms_booked}
+                      {guest.total_bookings}
                     </span>
                   </td>
-                  <td>{guest.total_bookings}</td>
                 </tr>
               ))}
             </tbody>

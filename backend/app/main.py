@@ -371,15 +371,13 @@ def get_all_bookings(conn=Depends(get_db_connection)):
 def create_booking(booking: BookingCreate, conn=Depends(get_db_connection)):
     cursor = conn.cursor(dictionary=True)
     try:
-        # Check if room is available
-        cursor.execute("SELECT occupancy_status FROM Rooms WHERE room_id = %s FOR UPDATE", (booking.room_id,))
+        cursor.execute("SELECT occupancy_status FROM Rooms WHERE room_id = %s", (booking.room_id,))
         room = cursor.fetchone()
         if not room:
-            raise HTTPException(status_code=404, detail=f"Room with id {booking.room_id} not found.")
+            raise HTTPException(status_code=404, detail=f"Room not found")
         if room['occupancy_status'] != 'Available':
-            raise HTTPException(status_code=409, detail=f"Room {booking.room_id} is not available.")
+            raise HTTPException(status_code=409, detail=f"Room not available")
             
-        # Create booking
         sql = """
         INSERT INTO Bookings (guest_id, room_id, check_in_date, check_out_date, booking_status)
         VALUES (%s, %s, %s, %s, %s)
@@ -389,15 +387,11 @@ def create_booking(booking: BookingCreate, conn=Depends(get_db_connection)):
             booking.check_out_date, booking.booking_status.value
         ))
         
-        # Update room status to Occupied
-        cursor.execute("UPDATE Rooms SET occupancy_status = 'Occupied' WHERE room_id = %s", (booking.room_id,))
-
         conn.commit()
         booking_id = cursor.lastrowid
         
         cursor.execute("SELECT * FROM Bookings WHERE booking_id = %s", (booking_id,))
-        new_booking = cursor.fetchone()
-        return new_booking
+        return cursor.fetchone()
 
     except mysql.connector.Error as e:
         conn.rollback()
@@ -407,57 +401,20 @@ def create_booking(booking: BookingCreate, conn=Depends(get_db_connection)):
         conn.close()
 
 @app.patch("/api/bookings/{booking_id}")
-def update_booking_status(
-    booking_id: int,
-    booking_status: BookingStatus,
-    conn=Depends(get_db_connection)
-):
-    """Update booking status and automatically update room occupancy status."""
+def update_booking_status(booking_id: int, booking_status: BookingStatus, conn=Depends(get_db_connection)):
     cursor = conn.cursor(dictionary=True)
     try:
-        # Get the booking details
         cursor.execute("SELECT * FROM Bookings WHERE booking_id = %s", (booking_id,))
         booking = cursor.fetchone()
         if not booking:
-            raise HTTPException(status_code=404, detail=f"Booking with id {booking_id} not found.")
+            raise HTTPException(status_code=404, detail=f"Booking not found")
         
-        room_id = booking['room_id']
-        old_status = booking['booking_status']
-        
-        # Update booking status
-        cursor.execute(
-            "UPDATE Bookings SET booking_status = %s WHERE booking_id = %s",
-            (booking_status.value, booking_id)
-        )
-        
-        # Update room occupancy based on new booking status
-        if booking_status in ['Completed', 'Cancelled']:
-            # Check if there are any other active bookings for this room
-            cursor.execute(
-                "SELECT COUNT(*) as count FROM Bookings WHERE room_id = %s AND booking_status = 'Active' AND booking_id != %s",
-                (room_id, booking_id)
-            )
-            result = cursor.fetchone()
-            
-            # If no other active bookings, set room to Available
-            if result['count'] == 0:
-                cursor.execute(
-                    "UPDATE Rooms SET occupancy_status = 'Available' WHERE room_id = %s",
-                    (room_id,)
-                )
-        elif booking_status == 'Active':
-            # Set room to Occupied when booking becomes active
-            cursor.execute(
-                "UPDATE Rooms SET occupancy_status = 'Occupied' WHERE room_id = %s",
-                (room_id,)
-            )
-        
+        cursor.execute("UPDATE Bookings SET booking_status = %s WHERE booking_id = %s",
+                      (booking_status.value, booking_id))
         conn.commit()
         
-        # Fetch and return updated booking
         cursor.execute("SELECT * FROM Bookings WHERE booking_id = %s", (booking_id,))
-        updated_booking = cursor.fetchone()
-        return updated_booking
+        return cursor.fetchone()
         
     except mysql.connector.Error as e:
         conn.rollback()
@@ -653,13 +610,11 @@ def get_single_rooms_booked_per_week(conn=Depends(get_db_connection)):
         FROM Bookings b
         JOIN Rooms r ON b.room_id = r.room_id
         WHERE r.room_type LIKE '%Single%'
-        AND (b.check_in_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-            OR b.created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY))
+        AND b.check_in_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
         """
         cursor.execute(sql)
         result = cursor.fetchone()
-        count = result['single_room_bookings'] if result else 0
-        return {"single_room_bookings_last_week": count}
+        return {"single_room_bookings_last_week": result['single_room_bookings']}
     finally:
         cursor.close()
         conn.close()
@@ -669,32 +624,25 @@ def get_single_rooms_booked_per_week(conn=Depends(get_db_connection)):
 def get_monthly_bookings_and_income(conn=Depends(get_db_connection)):
     cursor = conn.cursor(dictionary=True)
     try:
-        sql_bookings = """
+        sql = """
         SELECT COUNT(*) as total_bookings
         FROM Bookings
         WHERE check_in_date >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH)
         """
-        cursor.execute(sql_bookings)
-        bookings_result = cursor.fetchone()
+        cursor.execute(sql)
+        bookings = cursor.fetchone()
         
-        sql_income = """
-        SELECT 
-            SUM(amount_paid) as total_income,
-            AVG(amount_paid) as avg_income
+        sql = """
+        SELECT SUM(amount_paid) as total_income
         FROM Payments
         WHERE payment_date >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH)
         """
-        cursor.execute(sql_income)
-        income_result = cursor.fetchone()
-        
-        total_bookings = bookings_result['total_bookings'] if bookings_result else 0
-        total_income = float(income_result['total_income']) if income_result and income_result['total_income'] else 0
-        avg_income = float(income_result['avg_income']) if income_result and income_result['avg_income'] else 0
+        cursor.execute(sql)
+        income = cursor.fetchone()
         
         return {
-            "total_bookings_last_month": total_bookings,
-            "total_income_last_month": total_income,
-            "avg_income_last_month": avg_income
+            "total_bookings_last_month": bookings['total_bookings'],
+            "total_income_last_month": float(income['total_income']) if income['total_income'] else 0
         }
     finally:
         cursor.close()
@@ -706,18 +654,14 @@ def get_maintenance_by_room(conn=Depends(get_db_connection)):
     cursor = conn.cursor(dictionary=True)
     try:
         sql = """
-        SELECT 
-            r.room_number,
-            r.room_type,
-            COUNT(m.request_id) as maintenance_count
+        SELECT r.room_number, r.room_type, COUNT(m.request_id) as maintenance_count
         FROM Rooms r
         LEFT JOIN MaintenanceRequests m ON r.room_id = m.room_id
-        GROUP BY r.room_id, r.room_number, r.room_type
+        GROUP BY r.room_number, r.room_type
         ORDER BY maintenance_count DESC
         """
         cursor.execute(sql)
-        results = cursor.fetchall()
-        return {"maintenance_by_room": results}
+        return {"maintenance_by_room": cursor.fetchall()}
     finally:
         cursor.close()
         conn.close()
@@ -728,26 +672,20 @@ def get_guests_who_paid_by_room(conn=Depends(get_db_connection)):
     cursor = conn.cursor(dictionary=True)
     try:
         sql = """
-        SELECT 
-            r.room_number,
-            r.room_type,
-            g.full_name as guest_name,
-            g.phone_number,
-            SUM(p.amount_paid) as total_paid,
-            COUNT(p.payment_id) as payment_count
+        SELECT r.room_number, g.full_name as guest_name, SUM(p.amount_paid) as total_paid
         FROM Rooms r
         JOIN Bookings b ON r.room_id = b.room_id
         JOIN Guests g ON b.guest_id = g.guest_id
         JOIN Payments p ON b.booking_id = p.booking_id
-        GROUP BY r.room_id, r.room_number, r.room_type, g.guest_id, g.full_name, g.phone_number
-        ORDER BY r.room_number, total_paid DESC
+        GROUP BY r.room_number, g.full_name
+        HAVING total_paid > 500
+        ORDER BY total_paid DESC
         """
         cursor.execute(sql)
         results = cursor.fetchall()
         
         for row in results:
-            if row.get('total_paid'):
-                row['total_paid'] = float(row['total_paid'])
+            row['total_paid'] = float(row['total_paid'])
         
         return {"guests_with_payments": results}
     finally:
@@ -760,22 +698,14 @@ def get_rooms_booked_by_guest(conn=Depends(get_db_connection)):
     cursor = conn.cursor(dictionary=True)
     try:
         sql = """
-        SELECT 
-            g.guest_id,
-            g.full_name,
-            g.phone_number,
-            g.email,
-            COUNT(DISTINCT b.room_id) as rooms_booked,
-            COUNT(b.booking_id) as total_bookings
+        SELECT g.full_name, g.phone_number, COUNT(b.booking_id) as total_bookings
         FROM Guests g
-        LEFT JOIN Bookings b ON g.guest_id = b.guest_id
-        GROUP BY g.guest_id, g.full_name, g.phone_number, g.email
-        HAVING COUNT(b.booking_id) > 0
-        ORDER BY rooms_booked DESC, total_bookings DESC
+        JOIN Bookings b ON g.guest_id = b.guest_id
+        GROUP BY g.full_name, g.phone_number
+        ORDER BY total_bookings DESC
         """
         cursor.execute(sql)
-        results = cursor.fetchall()
-        return {"rooms_by_guest": results}
+        return {"rooms_by_guest": cursor.fetchall()}
     finally:
         cursor.close()
         conn.close()
