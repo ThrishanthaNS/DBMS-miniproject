@@ -834,6 +834,253 @@ def get_triggers_info(conn=Depends(get_db_connection)):
         conn.close()
 
 
+# Query Executor Endpoint
+class QueryRequest(BaseModel):
+    query_type: str  # e.g., "select_all_guests", "select_all_rooms", etc.
+    sort_order: Optional[str] = "ASC"  # ASC or DESC
+    sort_by: Optional[str] = None  # Column to sort by
+
+# Custom SQL Query Endpoint
+class CustomQueryRequest(BaseModel):
+    sql_query: str
+    query_type: str = "SELECT"  # SELECT, INSERT, UPDATE, DELETE
+
+@app.post("/api/execute-sql")
+def execute_custom_sql(request: CustomQueryRequest):
+    """Execute custom SQL queries with support for SELECT, INSERT, UPDATE, DELETE"""
+    print(f"Custom SQL executor called with query type: {request.query_type}")
+    print(f"Query: {request.sql_query}")
+    
+    conn = None
+    cursor = None
+    
+    try:
+        # Validate query type
+        sql_upper = request.sql_query.strip().upper()
+        
+        # Detect actual query type from SQL
+        actual_query_type = None
+        if sql_upper.startswith('SELECT'):
+            actual_query_type = 'SELECT'
+        elif sql_upper.startswith('INSERT'):
+            actual_query_type = 'INSERT'
+        elif sql_upper.startswith('UPDATE'):
+            actual_query_type = 'UPDATE'
+        elif sql_upper.startswith('DELETE'):
+            actual_query_type = 'DELETE'
+        elif sql_upper.startswith('CREATE'):
+            actual_query_type = 'CREATE'
+        elif sql_upper.startswith('ALTER'):
+            actual_query_type = 'ALTER'
+        elif sql_upper.startswith('DROP'):
+            actual_query_type = 'DROP'
+        elif sql_upper.startswith('DESCRIBE') or sql_upper.startswith('DESC'):
+            actual_query_type = 'DESCRIBE'
+        elif sql_upper.startswith('SHOW'):
+            actual_query_type = 'SHOW'
+        elif sql_upper.startswith('EXPLAIN'):
+            actual_query_type = 'EXPLAIN'
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported SQL query type")
+        
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # Execute the query
+        cursor.execute(request.sql_query)
+        
+        if actual_query_type in ['SELECT', 'DESCRIBE', 'SHOW', 'EXPLAIN']:
+            # For SELECT and other read queries, fetch results
+            results = cursor.fetchall()
+            
+            # Get column names
+            if results and len(results) > 0:
+                columns = list(results[0].keys())
+                
+                # Convert datetime and date objects to strings
+                for row in results:
+                    for key, value in row.items():
+                        if isinstance(value, (datetime, date)):
+                            row[key] = value.isoformat()
+                        elif isinstance(value, Decimal):
+                            row[key] = float(value)
+            else:
+                columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            
+            return {
+                "success": True,
+                "query": request.sql_query,
+                "query_type": actual_query_type,
+                "columns": columns,
+                "results": results,
+                "row_count": len(results),
+                "affected_rows": 0
+            }
+        else:
+            # For INSERT, UPDATE, DELETE queries
+            conn.commit()
+            affected_rows = cursor.rowcount
+            
+            return {
+                "success": True,
+                "query": request.sql_query,
+                "query_type": actual_query_type,
+                "message": f"{actual_query_type} query executed successfully",
+                "affected_rows": affected_rows,
+                "columns": [],
+                "results": [],
+                "row_count": 0
+            }
+            
+    except Error as e:
+        if conn:
+            conn.rollback()
+        print(f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f"Unexpected error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+@app.post("/api/query-executor")
+def execute_query(request: QueryRequest):
+    """Execute predefined queries with sorting options"""
+    print(f"Query executor called with: {request.dict()}")  # Debug log
+    
+    conn = None
+    cursor = None
+    
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        query = ""
+        query_description = ""
+        
+        # Define predefined queries based on query_type
+        if request.query_type == "select_all_guests":
+            sort_by = request.sort_by or "guest_id"
+            query = f"SELECT * FROM Guests ORDER BY {sort_by} {request.sort_order}"
+            query_description = f"Select all guests ordered by {sort_by} in {request.sort_order} order"
+            
+        elif request.query_type == "select_all_rooms":
+            sort_by = request.sort_by or "room_id"
+            query = f"SELECT * FROM Rooms ORDER BY {sort_by} {request.sort_order}"
+            query_description = f"Select all rooms ordered by {sort_by} in {request.sort_order} order"
+            
+        elif request.query_type == "select_all_bookings":
+            sort_by = request.sort_by or "booking_id"
+            query = f"SELECT * FROM Bookings ORDER BY {sort_by} {request.sort_order}"
+            query_description = f"Select all bookings ordered by {sort_by} in {request.sort_order} order"
+            
+        elif request.query_type == "select_all_payments":
+            sort_by = request.sort_by or "payment_id"
+            query = f"SELECT * FROM Payments ORDER BY {sort_by} {request.sort_order}"
+            query_description = f"Select all payments ordered by {sort_by} in {request.sort_order} order"
+            
+        elif request.query_type == "select_all_maintenance":
+            sort_by = request.sort_by or "request_id"
+            query = f"SELECT * FROM MaintenanceRequests ORDER BY {sort_by} {request.sort_order}"
+            query_description = f"Select all maintenance records ordered by {sort_by} in {request.sort_order} order"
+            
+        elif request.query_type == "guests_with_active_bookings":
+            query = f"""
+                SELECT g.*, b.booking_id, b.room_id, b.check_in_date, b.check_out_date 
+                FROM Guests g 
+                INNER JOIN Bookings b ON g.guest_id = b.guest_id 
+                WHERE b.booking_status = 'Active'
+                ORDER BY g.guest_id {request.sort_order}
+            """
+            query_description = f"Select guests with active bookings ordered in {request.sort_order} order"
+            
+        elif request.query_type == "available_rooms":
+            sort_by = request.sort_by or "room_id"
+            query = f"SELECT * FROM Rooms WHERE occupancy_status = 'Available' ORDER BY {sort_by} {request.sort_order}"
+            query_description = f"Select available rooms ordered by {sort_by} in {request.sort_order} order"
+            
+        elif request.query_type == "occupied_rooms":
+            sort_by = request.sort_by or "room_id"
+            query = f"SELECT * FROM Rooms WHERE occupancy_status = 'Occupied' ORDER BY {sort_by} {request.sort_order}"
+            query_description = f"Select occupied rooms ordered by {sort_by} in {request.sort_order} order"
+            
+        elif request.query_type == "recent_payments":
+            query = f"""
+                SELECT * FROM Payments 
+                ORDER BY payment_date {request.sort_order}
+                LIMIT 50
+            """
+            query_description = f"Select recent payments ordered by payment_date in {request.sort_order} order"
+            
+        elif request.query_type == "pending_maintenance":
+            query = f"""
+                SELECT * FROM MaintenanceRequests 
+                WHERE status = 'Pending'
+                ORDER BY reported_date {request.sort_order}
+            """
+            query_description = f"Select pending maintenance requests ordered by reported_date in {request.sort_order} order"
+            
+        else:
+            raise HTTPException(status_code=400, detail="Invalid query type")
+        
+        print(f"Executing query: {query}")  # Debug log
+        
+        # Execute the query
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        print(f"Query returned {len(results)} rows")  # Debug log
+        
+        # Get column names (handle empty results)
+        if results and len(results) > 0:
+            columns = list(results[0].keys())
+            
+            # Convert datetime and date objects to strings
+            for row in results:
+                for key, value in row.items():
+                    if isinstance(value, (datetime, date)):
+                        row[key] = value.isoformat()
+                    elif isinstance(value, Decimal):
+                        row[key] = float(value)
+        else:
+            # Get column names from cursor description
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        
+        response_data = {
+            "success": True,
+            "query": query,
+            "query_description": query_description,
+            "columns": columns,
+            "results": results,
+            "row_count": len(results)
+        }
+        
+        print(f"Returning response with {len(results)} rows")  # Debug log
+        return response_data
+        
+    except Error as e:
+        print(f"Database error: {str(e)}")  # Debug log
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")  # Debug log
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+        conn.close()
+
+
 @app.on_event("startup")
 def on_startup():
     print("Application is starting up...")

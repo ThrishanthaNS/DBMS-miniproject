@@ -8,6 +8,7 @@ import PaymentManagement from './components/PaymentManagement';
 import MaintenanceManagement from './components/MaintenanceManagement';
 import AnalyticsManagement from './components/AnalyticsManagement';
 import ViewsTriggersManagement from './components/ViewsTriggersManagement';
+import QueryExecutor from './components/QueryExecutor';
 
 function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -30,6 +31,8 @@ function App() {
         return <AnalyticsManagement />;
       case 'views':
         return <ViewsTriggersManagement />;
+      case 'query':
+        return <QueryExecutor />;
       default:
         return <Dashboard />;
     }
@@ -89,6 +92,12 @@ function App() {
             onClick={() => setCurrentView('views')}
           >
             🗂️ Views & Triggers
+          </button>
+          <button
+            className={currentView === 'query' ? 'nav-link active' : 'nav-link'}
+            onClick={() => setCurrentView('query')}
+          >
+            ⚡ Query Executor
           </button>
         </div>
       </nav>
